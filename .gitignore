@@ -1,0 +1,8 @@
+target
+.idea
+dumps
+version
+.scalafmt.conf
+*.iml
+.bsp
+.DS_Store

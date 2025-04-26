@@ -6,3 +6,4 @@ version
 *.iml
 .bsp
 .DS_Store
+/data/

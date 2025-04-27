@@ -20,7 +20,8 @@ class RandomForestTrainer(spark: SparkSession) {
       .csv("data/processed/train/processed_train_data.csv")
 
     val Array(trainSplit, testSplit) = trainData.randomSplit(Array(0.8, 0.2), seed = 1409)
-    val assembledTrainData = addClassWeights(FeaturePreprocessor.assembleData(trainSplit))
+    val assembledTrainData = FeaturePreprocessor.assembleData(trainSplit)
+    val assembledTrainDataWithWeights = FeaturePreprocessor.addClassWeights(assembledTrainData)
     val assembledTestData = FeaturePreprocessor.assembleData(testSplit)
 
     loadModel(modelPath) match {
@@ -30,28 +31,12 @@ class RandomForestTrainer(spark: SparkSession) {
         EvaluationUtils.evaluate(predictions)
       case None =>
         println("No model found. Training a new one.")
-        val model = trainModel(assembledTrainData)
+        val model = trainModel(assembledTrainDataWithWeights)
         model.write.overwrite().save(modelPath)
         println("New model saved.")
         val predictions = model.transform(assembledTestData)
         EvaluationUtils.evaluate(predictions)
     }
-  }
-
-  private def addClassWeights(data: DataFrame): DataFrame = {
-    // Calculate class weights
-    val classCounts = data.groupBy("isFraud").count()
-    val totalSamples = data.count()
-
-    val classWeights = classCounts.withColumn(
-      "classWeight",
-      lit(totalSamples) / col("count")
-    ).select(col("isFraud").alias("fraudClass"), col("classWeight"))
-
-    // Join weights with the original dataset
-    data.join(classWeights, data("isFraud") === classWeights("fraudClass"))
-      .withColumn("weight", col("classWeight"))
-      .drop("fraudClass", "classWeight")
   }
 
   private def loadModel(modelPath: String): Option[RandomForestClassificationModel] = {

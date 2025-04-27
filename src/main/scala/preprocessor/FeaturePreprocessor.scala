@@ -5,7 +5,7 @@ import preprocessor.FeaturePreprocessor.schema
 
 import org.apache.spark.ml.feature._
 import org.apache.spark.sql.DataFrame
-import org.apache.spark.sql.functions.{col, split}
+import org.apache.spark.sql.functions.{col, lit, split}
 import org.apache.spark.sql.types._
 
 import java.nio.file.{Files, Paths}
@@ -118,6 +118,22 @@ object FeaturePreprocessor {
       .transform(trainHashingEntityId)
       .transform(trainStringIndexing)
       .transform(trainAssembler)
+  }
+
+  def addClassWeights(data: DataFrame): DataFrame = {
+    // Calculate class weights
+    val classCounts = data.groupBy("isFraud").count()
+    val totalSamples = data.count().toDouble
+
+    val classWeights = classCounts.withColumn(
+      "classWeight",
+      lit(totalSamples) / col("count")
+    ).select(col("isFraud").alias("fraudClass"), col("classWeight"))
+
+    // Join weights with the original dataset
+    data.join(classWeights, data("isFraud") === classWeights("fraudClass"))
+      .withColumn("weight", col("classWeight"))
+      .drop("fraudClass", "classWeight")
   }
 
   private def trainWord2VecModel(trainData: DataFrame): DataFrame = {

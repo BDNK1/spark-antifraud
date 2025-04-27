@@ -18,6 +18,16 @@ object Main {
       .config("spark.pyspark.driver.python", "/usr/local/bin/python3")
       .getOrCreate()
 
+    // Register shutdown hook for graceful termination
+    Runtime.getRuntime.addShutdownHook(new Thread() {
+      override def run(): Unit = {
+        println("Shutdown hook triggered, stopping Spark session...")
+        if (!spark.sparkContext.isStopped) {
+          spark.stop()
+        }
+      }
+    })
+
     val preprocessor = new DataPreprocessor(spark)
 
     if (!preprocessor.isDataProcessed()) {

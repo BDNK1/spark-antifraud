@@ -4,7 +4,9 @@ import org.apache.spark.ml.evaluation.{BinaryClassificationEvaluator, Multiclass
 import org.apache.spark.sql.DataFrame
 
 object EvaluationUtils {
-  def evaluate(predictions: DataFrame): Unit = {
+  case class EvaluationMetrics(accuracy: Double, roc: Double, aupr: Double, f1: Double)
+
+  def evaluate(predictions: DataFrame): EvaluationMetrics = {
     val binaryEvaluator = new BinaryClassificationEvaluator()
       .setLabelCol("isFraud")
       .setRawPredictionCol("rawPrediction")
@@ -27,5 +29,13 @@ object EvaluationUtils {
     println(s"AUPR: $aupr")
     println(s"F1: $f1")
 
+    EvaluationMetrics(accuracy, roc, aupr, f1)
+  }
+
+  def printMetrics(metrics: EvaluationMetrics): Unit = {
+    println(s"Accuracy: ${metrics.accuracy}")
+    println(s"ROC: ${metrics.roc}")
+    println(s"AUPR: ${metrics.aupr}")
+    println(s"F1: ${metrics.f1}")
   }
 }

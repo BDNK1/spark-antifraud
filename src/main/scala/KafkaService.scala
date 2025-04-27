@@ -1,14 +1,15 @@
 package spark.kp4
 
+import metrics.MetricsService
 import models.GBTModelTrainer
 import preprocessor.FeaturePreprocessor
 
 import org.apache.spark.ml.classification.GBTClassificationModel
+import org.apache.spark.ml.functions.vector_to_array
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.streaming.Trigger
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
-
 
 class KafkaService(spark: SparkSession) {
 
@@ -18,11 +19,14 @@ class KafkaService(spark: SparkSession) {
   val kafkaTopic = "transactions"
 
   def process(): Unit = {
+    MetricsService.startServer()
+
     val kafkaStream: DataFrame = spark.readStream
       .format("kafka")
       .option("kafka.bootstrap.servers", kafkaBootstrapServers)
       .option("subscribe", kafkaTopic)
       .option("startingOffsets", "earliest")
+      .option("failOnDataLoss", "false")
       .load()
 
     val eventStream = kafkaStream
@@ -31,17 +35,27 @@ class KafkaService(spark: SparkSession) {
       .select("data.*")
       .transform(featurePreprocessor.assembleStreamingData)
 
-    // Передбачення за допомогою GBT моделі
     val processedStream = model.transform(eventStream)
 
-    // Перетворення результатів у JSON та перейменування стовпця на 'value'
-    val outputStream = processedStream
+    val metricsStream = processedStream
+      .withColumn("isFraud", when(col("prediction") === 1.0, true).otherwise(false))
+      .withColumn("prob_array", vector_to_array(col("probability")))
+      .withColumn("probability", col("prob_array").getItem(1))
+      .withColumn("isHighRisk", when(col("probability") > 0.4, true).otherwise(false))
+      .drop("prob_array")
+
+    val metricsQuery = metricsStream.writeStream
+      .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
+        MetricsService.generateBatchMetrics(batchDF)
+      }
+      .start()
+
+    val outputStream = metricsStream
       .select(to_json(struct("*")).as("value"))
 
-    // Вивід результатів у консоль або запис у Kafka
     val query = outputStream
       .writeStream
-      .format("kafka") // Можна змінити на 'kafka' для запису назад
+      .format("kafka")
       .option("kafka.bootstrap.servers", kafkaBootstrapServers)
       .option("topic", "transactions_processed")
       .trigger(Trigger.ProcessingTime("10 seconds"))
@@ -51,8 +65,6 @@ class KafkaService(spark: SparkSession) {
   }
 
   def uploadTestingDataToKafka(): Unit = {
-    val delayMillis = 300
-
     val df = spark.read
       .format("csv")
       .option("header", "true")
@@ -61,7 +73,8 @@ class KafkaService(spark: SparkSession) {
       .load("data/processed/test/")
 
     df.toJSON.collect().foreach { row =>
-      Thread.sleep(delayMillis)
+      val randomDelay = Math.random() * 500
+      Thread.sleep(randomDelay.toLong)
       val kafkaDF = spark.createDataFrame(java.util.Collections.singletonList(Row(row)), StructType(Array(StructField("value", StringType))))
       println(s"Sending message: $row")
       kafkaDF.write
@@ -70,7 +83,20 @@ class KafkaService(spark: SparkSession) {
         .option("topic", kafkaTopic)
         .save()
     }
+  }
 
+  def shutdown(): Unit = {
+    println("Initiating graceful shutdown of Kafka service...")
+
+    println("Stopping metrics server...")
+    MetricsService.stopServer()
+
+    if (!spark.sparkContext.isStopped) {
+      println("Stopping Spark session...")
+      spark.stop()
+    }
+
+    println("Kafka service shutdown complete")
   }
 
 }
@@ -84,6 +110,14 @@ object KafkaListenerApp {
       .getOrCreate()
 
     val processor = new KafkaService(spark)
+
+    Runtime.getRuntime.addShutdownHook(new Thread() {
+      override def run(): Unit = {
+        println("Shutdown hook triggered, performing graceful shutdown...")
+        processor.shutdown()
+      }
+    })
+
     processor.process()
   }
 }
@@ -99,4 +133,3 @@ object KafkaProducerApp {
     processor.uploadTestingDataToKafka()
   }
 }
-

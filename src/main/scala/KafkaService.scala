@@ -10,6 +10,7 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.streaming.Trigger
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.elasticsearch.spark.sql._ // Import for Elasticsearch
 
 class KafkaService(spark: SparkSession) {
 
@@ -58,10 +59,23 @@ class KafkaService(spark: SparkSession) {
       .format("kafka")
       .option("kafka.bootstrap.servers", kafkaBootstrapServers)
       .option("topic", "transactions_processed")
+      .option("checkpointLocation", "checkpoint-kafka") // Checkpoint for Kafka
       .trigger(Trigger.ProcessingTime("10 seconds"))
       .start()
 
-    query.awaitTermination()
+    // New Elasticsearch stream for metricsStream
+    val esQuery = metricsStream // Writing the structured metricsStream
+      .writeStream
+      .format("org.elasticsearch.spark.sql")
+      .option("es.nodes", "elasticsearch")
+      .option("es.port", "9200")
+      .option("es.resource", "transactions_processed/_doc") // Index and type
+      .option("es.nodes.wan.only", "true")
+      .option("checkpointLocation", "checkpoint-elasticsearch") // Checkpoint for Elasticsearch
+      .trigger(Trigger.ProcessingTime("10 seconds")) // Match Kafka trigger
+      .start()
+
+    spark.streams.awaitAnyTermination() // Wait for all streams (Kafka and ES)
   }
 
   def uploadTestingDataToKafka(): Unit = {
@@ -106,7 +120,7 @@ object KafkaListenerApp {
     val spark = SparkSession.builder
       .appName("Antifraud")
       .master("local[*]")
-      .config("spark.sql.streaming.checkpointLocation", "checkpoint")
+      // .config("spark.sql.streaming.checkpointLocation", "checkpoint") // Removed global checkpoint
       .getOrCreate()
 
     val processor = new KafkaService(spark)

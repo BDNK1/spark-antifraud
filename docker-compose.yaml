@@ -70,6 +70,30 @@ services:
     networks:
       - kafka-net
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.10
+    container_name: elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+    networks:
+      - kafka-net
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.10
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - kafka-net
+
 networks:
   kafka-net:
     driver: bridge
@@ -80,4 +104,6 @@ volumes:
     prometheus_data:
         driver: local
     grafana_data:
+        driver: local
+    elasticsearch_data:
         driver: local

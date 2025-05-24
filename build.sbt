@@ -23,6 +23,9 @@ lazy val root = (project in file("."))
       "io.prometheus" % "simpleclient_hotspot" % prometheusVersion,
       "io.prometheus" % "simpleclient_httpserver" % prometheusVersion,
       "io.prometheus" % "simpleclient_pushgateway" % prometheusVersion,
+
+      // Elasticsearch Spark Connector
+      "org.elasticsearch" % "elasticsearch-spark-30_2.12" % "7.17.10"
     )
 
   )
